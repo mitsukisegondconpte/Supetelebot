@@ -1,0 +1,576 @@
+{% extends "base.html" %}
+
+{% block title %}Monitoring Temps Réel - Bot d'Échecs{% endblock %}
+
+{% block head %}
+<link href="{{ url_for('static', filename='css/admin.css') }}" rel="stylesheet">
+<style>
+    .monitor-card {
+        transition: all 0.3s ease;
+        border: 1px solid #dee2e6;
+    }
+    .monitor-card:hover {
+        border-color: #007bff;
+        box-shadow: 0 4px 8px rgba(0,123,255,.25);
+    }
+    .activity-stream {
+        max-height: 500px;
+        overflow-y: auto;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 15px;
+        background: #f8f9fa;
+    }
+    .live-activity {
+        padding: 10px;
+        margin: 5px 0;
+        border-radius: 6px;
+        background: white;
+        border-left: 4px solid #28a745;
+        animation: slideIn 0.5s ease;
+    }
+    .live-activity.new {
+        background: #d4edda;
+        border-left-color: #155724;
+    }
+    @keyframes slideIn {
+        from { transform: translateX(-100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+    }
+    .status-indicator {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 8px;
+    }
+    .status-online { background: #28a745; animation: pulse 2s infinite; }
+    .status-busy { background: #ffc107; }
+    .status-offline { background: #dc3545; }
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 15px;
+        padding: 20px;
+        text-align: center;
+    }
+    .metric-value {
+        font-size: 2.5rem;
+        font-weight: bold;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1><i class="fas fa-chart-line"></i> Monitoring Temps Réel</h1>
+            <div class="d-flex align-items-center">
+                <span class="status-indicator status-online" id="connection-status"></span>
+                <span id="connection-text">Connexion...</span>
+                <button class="btn btn-outline-primary ms-3" onclick="toggleMonitoring()" id="monitor-toggle">
+                    <i class="fas fa-pause"></i> Pause
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Métriques en temps réel -->
+<div class="row mb-4">
+    <div class="col-md-2">
+        <div class="metric-card">
+            <div class="metric-value" id="live-users">0</div>
+            <div>Utilisateurs<br>Connectés</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="metric-card">
+            <div class="metric-value" id="live-games">0</div>
+            <div>Parties<br>Actives</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="metric-card">
+            <div class="metric-value" id="live-moves">0</div>
+            <div>Coups<br>par Minute</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="metric-card">
+            <div class="metric-value" id="live-commands">0</div>
+            <div>Commandes<br>par Minute</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="metric-card">
+            <div class="metric-value" id="response-time">0ms</div>
+            <div>Temps<br>Réponse</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="metric-card">
+            <div class="metric-value" id="success-rate">100%</div>
+            <div>Taux<br>Succès</div>
+        </div>
+    </div>
+</div>
+
+<!-- Graphiques temps réel -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card monitor-card">
+            <div class="card-header">
+                <h5><i class="fas fa-chart-area"></i> Activité en Temps Réel</h5>
+                <div class="float-end">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="resetChart()">
+                        <i class="fas fa-redo"></i> Reset
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="realtimeChart" height="60"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card monitor-card">
+            <div class="card-header">
+                <h5><i class="fas fa-tachometer-alt"></i> Performance Système</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="performanceChart" height="120"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Flux d'activités et utilisateurs actifs -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card monitor-card">
+            <div class="card-header d-flex justify-content-between">
+                <h5><i class="fas fa-stream"></i> Flux d'Activités Live</h5>
+                <div>
+                    <button class="btn btn-sm btn-outline-success" onclick="clearActivityStream()">
+                        <i class="fas fa-trash"></i> Clear
+                    </button>
+                    <span class="badge bg-success" id="activity-count">0</span>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="activity-stream" id="activity-stream">
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-spinner fa-spin fa-2x"></i>
+                        <p class="mt-2">En attente d'activités...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card monitor-card">
+            <div class="card-header">
+                <h5><i class="fas fa-users"></i> Utilisateurs Actifs</h5>
+            </div>
+            <div class="card-body" style="max-height: 500px; overflow-y: auto;">
+                <div id="active-users-list">
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-user-clock fa-2x"></i>
+                        <p class="mt-2">Chargement...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Alertes et notifications -->
+<div class="row">
+    <div class="col-12">
+        <div class="card monitor-card">
+            <div class="card-header">
+                <h5><i class="fas fa-bell"></i> Alertes Système</h5>
+                <div class="float-end">
+                    <button class="btn btn-sm btn-outline-warning" onclick="clearAlerts()">
+                        <i class="fas fa-bell-slash"></i> Clear
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="system-alerts">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        Système de monitoring initialisé. En attente d'événements...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal détails utilisateur -->
+<div class="modal fade" id="userModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Détails Utilisateur</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="user-modal-content">
+                <!-- Contenu dynamique -->
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- Script de monitoring temps réel -->
+<script src="{{ url_for('static', filename='js/realtime.js') }}"></script>
+
+<script>
+// Variables globales
+let monitoringActive = true;
+let activityCount = 0;
+let chartData = {
+    labels: [],
+    activities: [],
+    games: [],
+    users: []
+};
+
+// Configuration des graphiques
+const realtimeCtx = document.getElementById('realtimeChart').getContext('2d');
+const realtimeChart = new Chart(realtimeCtx, {
+    type: 'line',
+    data: {
+        labels: chartData.labels,
+        datasets: [
+            {
+                label: 'Activités',
+                data: chartData.activities,
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                tension: 0.1
+            },
+            {
+                label: 'Parties',
+                data: chartData.games,
+                borderColor: 'rgb(255, 99, 132)',
+                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                tension: 0.1
+            },
+            {
+                label: 'Utilisateurs',
+                data: chartData.users,
+                borderColor: 'rgb(54, 162, 235)',
+                backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                tension: 0.1
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                beginAtZero: true
+            }
+        },
+        animation: {
+            duration: 750
+        }
+    }
+});
+
+const performanceCtx = document.getElementById('performanceChart').getContext('2d');
+const performanceChart = new Chart(performanceCtx, {
+    type: 'doughnut',
+    data: {
+        labels: ['CPU', 'Mémoire', 'Disque'],
+        datasets: [{
+            data: [0, 0, 0],
+            backgroundColor: [
+                'rgba(255, 99, 132, 0.8)',
+                'rgba(54, 162, 235, 0.8)',
+                'rgba(255, 205, 86, 0.8)'
+            ]
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'bottom'
+            }
+        }
+    }
+});
+
+// Connexion WebSocket
+const socket = io('/admin');
+
+socket.on('connect', function() {
+    updateConnectionStatus('online', 'Connecté - Monitoring actif');
+    console.log('Connecté au monitoring temps réel');
+});
+
+socket.on('disconnect', function() {
+    updateConnectionStatus('offline', 'Déconnecté');
+});
+
+socket.on('stats_update', function(data) {
+    updateLiveMetrics(data);
+    updateChart(data);
+});
+
+socket.on('live_activity', function(data) {
+    if (monitoringActive) {
+        addLiveActivity(data);
+        incrementActivityCount();
+    }
+});
+
+socket.on('webhook_event', function(data) {
+    if (monitoringActive) {
+        addWebhookActivity(data);
+    }
+});
+
+socket.on('system_alert', function(data) {
+    addSystemAlert(data);
+});
+
+socket.on('move_played', function(data) {
+    if (monitoringActive) {
+        addMoveActivity(data);
+    }
+});
+
+socket.on('new_game', function(data) {
+    if (monitoringActive) {
+        addGameActivity(data);
+    }
+});
+
+// Fonctions de mise à jour
+function updateConnectionStatus(status, text) {
+    const indicator = document.getElementById('connection-status');
+    const textElement = document.getElementById('connection-text');
+    
+    indicator.className = `status-indicator status-${status}`;
+    textElement.textContent = text;
+}
+
+function updateLiveMetrics(data) {
+    document.getElementById('live-users').textContent = data.active_users || 0;
+    document.getElementById('live-games').textContent = data.active_games || 0;
+    document.getElementById('live-moves').textContent = data.moves_per_minute || 0;
+    document.getElementById('live-commands').textContent = data.commands_per_minute || 0;
+    document.getElementById('response-time').textContent = (data.avg_response_time || 0) + 'ms';
+    document.getElementById('success-rate').textContent = (data.success_rate || 100) + '%';
+}
+
+function updateChart(data) {
+    const now = new Date().toLocaleTimeString();
+    
+    chartData.labels.push(now);
+    chartData.activities.push(data.activities_last_minute || 0);
+    chartData.games.push(data.active_games || 0);
+    chartData.users.push(data.active_users_5min || 0);
+    
+    // Garder seulement les 20 derniers points
+    if (chartData.labels.length > 20) {
+        chartData.labels.shift();
+        chartData.activities.shift();
+        chartData.games.shift();
+        chartData.users.shift();
+    }
+    
+    realtimeChart.update('none');
+}
+
+function addLiveActivity(activity) {
+    const stream = document.getElementById('activity-stream');
+    
+    // Supprimer le message d'attente si présent
+    if (stream.querySelector('.text-center')) {
+        stream.innerHTML = '';
+    }
+    
+    const activityDiv = document.createElement('div');
+    activityDiv.className = 'live-activity new';
+    activityDiv.innerHTML = `
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                <strong>${activity.user_name}</strong>
+                <span class="badge bg-primary ms-2">${activity.type}</span>
+                <div class="mt-1 text-muted small">${activity.description}</div>
+            </div>
+            <small class="text-muted">${new Date().toLocaleTimeString()}</small>
+        </div>
+    `;
+    
+    stream.insertBefore(activityDiv, stream.firstChild);
+    
+    // Animation
+    setTimeout(() => {
+        activityDiv.classList.remove('new');
+    }, 2000);
+    
+    // Limiter à 50 activités
+    while (stream.children.length > 50) {
+        stream.removeChild(stream.lastChild);
+    }
+    
+    // Auto-scroll si nécessaire
+    if (stream.scrollTop < 50) {
+        stream.scrollTop = 0;
+    }
+}
+
+function addWebhookActivity(data) {
+    addLiveActivity({
+        user_name: data.user_name || 'Système',
+        type: 'webhook',
+        description: `Webhook reçu - Update ID: ${data.update_id}`
+    });
+}
+
+function addMoveActivity(data) {
+    addLiveActivity({
+        user_name: data.user_name || `User ${data.user_id}`,
+        type: 'move',
+        description: `Coup joué: ${data.move} ${data.ai_move ? '| IA: ' + data.ai_move : ''}`
+    });
+}
+
+function addGameActivity(data) {
+    addLiveActivity({
+        user_name: data.user_name || `User ${data.user_id}`,
+        type: 'game',
+        description: `Nouvelle partie #${data.game_id}`
+    });
+}
+
+function addSystemAlert(alert) {
+    const alertsContainer = document.getElementById('system-alerts');
+    
+    const severityClass = {
+        'info': 'alert-info',
+        'warning': 'alert-warning',
+        'danger': 'alert-danger',
+        'success': 'alert-success'
+    };
+    
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert ${severityClass[alert.severity] || 'alert-info'} alert-dismissible fade show`;
+    alertDiv.innerHTML = `
+        <strong>${new Date().toLocaleTimeString()}</strong> - ${alert.message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    alertsContainer.insertBefore(alertDiv, alertsContainer.firstChild);
+    
+    // Limiter à 10 alertes
+    while (alertsContainer.children.length > 10) {
+        alertsContainer.removeChild(alertsContainer.lastChild);
+    }
+}
+
+function incrementActivityCount() {
+    activityCount++;
+    document.getElementById('activity-count').textContent = activityCount;
+}
+
+// Fonctions de contrôle
+function toggleMonitoring() {
+    monitoringActive = !monitoringActive;
+    const button = document.getElementById('monitor-toggle');
+    
+    if (monitoringActive) {
+        button.innerHTML = '<i class="fas fa-pause"></i> Pause';
+        button.className = 'btn btn-outline-primary ms-3';
+        updateConnectionStatus('online', 'Connecté - Monitoring actif');
+    } else {
+        button.innerHTML = '<i class="fas fa-play"></i> Resume';
+        button.className = 'btn btn-outline-success ms-3';
+        updateConnectionStatus('busy', 'Connecté - Monitoring en pause');
+    }
+}
+
+function clearActivityStream() {
+    document.getElementById('activity-stream').innerHTML = `
+        <div class="text-center text-muted py-4">
+            <i class="fas fa-stream fa-2x"></i>
+            <p class="mt-2">Flux d'activités vidé. En attente...</p>
+        </div>
+    `;
+    activityCount = 0;
+    document.getElementById('activity-count').textContent = '0';
+}
+
+function clearAlerts() {
+    document.getElementById('system-alerts').innerHTML = `
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle"></i>
+            Alertes effacées. En attente de nouveaux événements...
+        </div>
+    `;
+}
+
+function resetChart() {
+    chartData.labels = [];
+    chartData.activities = [];
+    chartData.games = [];
+    chartData.users = [];
+    realtimeChart.update();
+}
+
+// Initialisation
+document.addEventListener('DOMContentLoaded', function() {
+    // Demander les statistiques initiales
+    socket.emit('request_stats');
+    
+    // Demander les utilisateurs actifs
+    socket.emit('request_active_games');
+    
+    // Mise à jour périodique
+    setInterval(() => {
+        if (monitoringActive) {
+            socket.emit('request_stats');
+        }
+    }, 5000);
+    
+    // Mise à jour performance système
+    setInterval(updateSystemPerformance, 10000);
+});
+
+function updateSystemPerformance() {
+    fetch('/admin/api/system-info')
+        .then(response => response.json())
+        .then(data => {
+            if (data.cpu_percent !== undefined) {
+                performanceChart.data.datasets[0].data = [
+                    data.cpu_percent || 0,
+                    data.memory_percent || 0,
+                    data.disk_percent || 0
+                ];
+                performanceChart.update();
+            }
+        })
+        .catch(error => console.log('Info système limitée'));
+}
+</script>
+{% endblock %}
