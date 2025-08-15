@@ -1,0 +1,435 @@
+{% extends "base.html" %}
+
+{% block title %}Gestion des Parties - Bot d'Échecs{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1><i class="fas fa-chess"></i> Gestion des Parties</h1>
+            <div>
+                <button class="btn btn-outline-primary" onclick="refreshGames()">
+                    <i class="fas fa-sync-alt"></i> Actualiser
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filtres -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <select class="form-select" id="status-filter" onchange="filterGames()">
+                            <option value="active" {{ 'selected' if current_status == 'active' }}>Parties actives</option>
+                            <option value="finished" {{ 'selected' if current_status == 'finished' }}>Parties terminées</option>
+                            <option value="abandoned" {{ 'selected' if current_status == 'abandoned' }}>Parties abandonnées</option>
+                            <option value="all" {{ 'selected' if current_status == 'all' }}>Toutes les parties</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <input type="text" class="form-control" id="search-games" placeholder="Rechercher par utilisateur...">
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select" id="sort-games">
+                            <option value="recent">Plus récentes</option>
+                            <option value="oldest">Plus anciennes</option>
+                            <option value="moves">Nombre de coups</option>
+                            <option value="duration">Durée</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="d-flex">
+                            <input type="date" class="form-control me-2" id="date-from">
+                            <input type="date" class="form-control" id="date-to">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statistiques rapides -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center border-success">
+            <div class="card-body">
+                <i class="fas fa-play-circle fa-2x text-success mb-2"></i>
+                <h4>{{ games.items|selectattr('status', 'equalto', 'active')|list|length }}</h4>
+                <p class="card-text">Parties Actives</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-primary">
+            <div class="card-body">
+                <i class="fas fa-flag-checkered fa-2x text-primary mb-2"></i>
+                <h4>{{ games.items|selectattr('status', 'equalto', 'finished')|list|length }}</h4>
+                <p class="card-text">Parties Terminées</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-warning">
+            <div class="card-body">
+                <i class="fas fa-flag fa-2x text-warning mb-2"></i>
+                <h4>{{ games.items|selectattr('status', 'equalto', 'abandoned')|list|length }}</h4>
+                <p class="card-text">Parties Abandonnées</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-info">
+            <div class="card-body">
+                <i class="fas fa-chess-board fa-2x text-info mb-2"></i>
+                <h4>{{ games.total }}</h4>
+                <p class="card-text">Total</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Liste des parties -->
+<div class="card">
+    <div class="card-header">
+        <h5><i class="fas fa-list"></i> Liste des Parties</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Joueur</th>
+                        <th>Statut</th>
+                        <th>Coups</th>
+                        <th>Niveau</th>
+                        <th>Résultat</th>
+                        <th>Créée le</th>
+                        <th>Durée</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for game in games.items %}
+                    <tr>
+                        <td><strong>#{{ game.id }}</strong></td>
+                        <td>
+                            <a href="{{ url_for('admin.user_detail', telegram_id=game.user.telegram_id) }}" class="text-decoration-none">
+                                {{ game.user.first_name or game.user.username or 'Utilisateur ' + game.user.telegram_id|string }}
+                            </a>
+                            <br><small class="text-muted">ID: {{ game.user.telegram_id }}</small>
+                        </td>
+                        <td>
+                            {% if game.status == 'active' %}
+                                <span class="badge bg-success">Active</span>
+                            {% elif game.status == 'finished' %}
+                                <span class="badge bg-primary">Terminée</span>
+                            {% elif game.status == 'abandoned' %}
+                                <span class="badge bg-warning">Abandonnée</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ game.status|title }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-info">{{ game.move_count }}</span>
+                        </td>
+                        <td>
+                            <span class="badge bg-secondary">Niveau {{ game.difficulty_level }}</span>
+                        </td>
+                        <td>
+                            {% if game.result %}
+                                {% if game.result == 'white_wins' %}
+                                    <span class="badge bg-success">Victoire joueur</span>
+                                {% elif game.result == 'black_wins' %}
+                                    <span class="badge bg-danger">Victoire IA</span>
+                                {% elif game.result == 'draw' %}
+                                    <span class="badge bg-warning">Match nul</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">{{ game.result }}</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">En cours</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ game.created_at.strftime('%d/%m/%Y') }}
+                            <br><small class="text-muted">{{ game.created_at.strftime('%H:%M') }}</small>
+                        </td>
+                        <td>
+                            {% if game.finished_at %}
+                                {% set duration = game.finished_at - game.created_at %}
+                                {% if duration.days > 0 %}
+                                    {{ duration.days }}j {{ (duration.seconds // 3600) }}h
+                                {% elif duration.seconds > 3600 %}
+                                    {{ (duration.seconds // 3600) }}h {{ ((duration.seconds % 3600) // 60) }}m
+                                {% else %}
+                                    {{ (duration.seconds // 60) }}m
+                                {% endif %}
+                            {% else %}
+                                {% set duration = moment.utcnow() - game.created_at %}
+                                <span class="text-muted">{{ moment(game.created_at).fromNow() }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group" role="group">
+                                <button class="btn btn-sm btn-outline-primary" onclick="showGameDetails({{ game.id }})" title="Détails">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-info" onclick="showBoard({{ game.id }})" title="Voir échiquier">
+                                    <i class="fas fa-chess-board"></i>
+                                </button>
+                                {% if game.status == 'active' %}
+                                <button class="btn btn-sm btn-outline-warning" onclick="forceEndGame({{ game.id }})" title="Terminer">
+                                    <i class="fas fa-stop"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Pagination -->
+        {% if games.pages > 1 %}
+        <nav aria-label="Navigation parties">
+            <ul class="pagination justify-content-center">
+                {% if games.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('admin.games', page=games.prev_num, status=current_status) }}">Précédent</a>
+                </li>
+                {% endif %}
+                
+                {% for page_num in games.iter_pages() %}
+                    {% if page_num %}
+                        {% if page_num != games.page %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('admin.games', page=page_num, status=current_status) }}">{{ page_num }}</a>
+                        </li>
+                        {% else %}
+                        <li class="page-item active">
+                            <span class="page-link">{{ page_num }}</span>
+                        </li>
+                        {% endif %}
+                    {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">…</span>
+                    </li>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if games.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('admin.games', page=games.next_num, status=current_status) }}">Suivant</a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Modal détails partie -->
+<div class="modal fade" id="gameModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Détails de la Partie</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="game-modal-content">
+                <!-- Contenu dynamique -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal échiquier -->
+<div class="modal fade" id="boardModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Échiquier</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center" id="board-modal-content">
+                <!-- Contenu dynamique -->
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function refreshGames() {
+    location.reload();
+}
+
+function filterGames() {
+    const status = document.getElementById('status-filter').value;
+    window.location.href = `{{ url_for('admin.games') }}?status=${status}`;
+}
+
+function showGameDetails(gameId) {
+    const modal = new bootstrap.Modal(document.getElementById('gameModal'));
+    const content = document.getElementById('game-modal-content');
+    
+    content.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Chargement...</div>';
+    modal.show();
+    
+    // Simuler le chargement des détails (à remplacer par un vrai appel API)
+    setTimeout(() => {
+        content.innerHTML = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6>Informations générales</h6>
+                    <p><strong>ID:</strong> #${gameId}</p>
+                    <p><strong>Statut:</strong> <span class="badge bg-primary">En cours</span></p>
+                    <p><strong>Nombre de coups:</strong> 25</p>
+                    <p><strong>Niveau de difficulté:</strong> 5</p>
+                </div>
+                <div class="col-md-6">
+                    <h6>Chronologie</h6>
+                    <p><strong>Créée:</strong> Il y a 2 heures</p>
+                    <p><strong>Dernier coup:</strong> Il y a 3 minutes</p>
+                    <p><strong>Temps moyen par coup:</strong> 45 secondes</p>
+                </div>
+            </div>
+            <div class="row mt-3">
+                <div class="col-12">
+                    <h6>Position FEN actuelle</h6>
+                    <code>rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1</code>
+                </div>
+            </div>
+        `;
+    }, 1000);
+}
+
+function showBoard(gameId) {
+    const modal = new bootstrap.Modal(document.getElementById('boardModal'));
+    const content = document.getElementById('board-modal-content');
+    
+    content.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Génération de l\'échiquier...</div>';
+    modal.show();
+    
+    // Simuler l'affichage de l'échiquier
+    setTimeout(() => {
+        content.innerHTML = `
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i>
+                Échiquier de la partie #${gameId}
+            </div>
+            <div style="width: 400px; height: 400px; background: #f0d9b5; margin: 0 auto; border: 2px solid #8b7355; display: flex; align-items: center; justify-content: center;">
+                <div class="text-center">
+                    <i class="fas fa-chess-board fa-5x text-secondary"></i>
+                    <p class="mt-3">Échiquier simulé</p>
+                    <small class="text-muted">Intégration avec le module de rendu à implémenter</small>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button class="btn btn-primary" onclick="downloadPGN(${gameId})">
+                    <i class="fas fa-download"></i> Télécharger PGN
+                </button>
+                <button class="btn btn-success" onclick="analyzPosition(${gameId})">
+                    <i class="fas fa-brain"></i> Analyser Position
+                </button>
+            </div>
+        `;
+    }, 1500);
+}
+
+function forceEndGame(gameId) {
+    if (confirm('Êtes-vous sûr de vouloir terminer cette partie ?')) {
+        // Appel API pour terminer la partie
+        fetch(`/admin/api/games/${gameId}/end`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Partie terminée avec succès');
+                location.reload();
+            } else {
+                alert('Erreur: ' + data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Erreur:', error);
+            alert('Erreur lors de l\'opération');
+        });
+    }
+}
+
+function downloadPGN(gameId) {
+    // Simuler le téléchargement PGN
+    const pgn = `[Event "Bot Chess Game"]
+[Site "Telegram Bot"]
+[Date "${new Date().toISOString().split('T')[0]}"]
+[Round "-"]
+[White "User"]
+[Black "Stockfish"]
+[Result "*"]
+
+1. e4 e5 2. Nf3 Nc6 *`;
+    
+    const blob = new Blob([pgn], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `game_${gameId}.pgn`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function analyzPosition(gameId) {
+    alert('Fonction d\'analyse à implémenter avec Stockfish');
+}
+
+// Recherche en temps réel
+document.getElementById('search-games').addEventListener('input', function() {
+    const searchTerm = this.value.toLowerCase();
+    const rows = document.querySelectorAll('tbody tr');
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    });
+});
+
+// Tri
+document.getElementById('sort-games').addEventListener('change', function() {
+    const sortBy = this.value;
+    // Implémenter le tri côté client ou recharger avec paramètres
+    console.log('Tri par:', sortBy);
+});
+
+// Filtres par date
+document.getElementById('date-from').addEventListener('change', applyDateFilter);
+document.getElementById('date-to').addEventListener('change', applyDateFilter);
+
+function applyDateFilter() {
+    const dateFrom = document.getElementById('date-from').value;
+    const dateTo = document.getElementById('date-to').value;
+    
+    if (dateFrom || dateTo) {
+        const rows = document.querySelectorAll('tbody tr');
+        rows.forEach(row => {
+            const dateCell = row.cells[6].textContent; // Colonne date
+            // Logique de filtrage par date à implémenter
+            // Pour l'instant, afficher toutes les lignes
+            row.style.display = '';
+        });
+    }
+}
+</script>
+{% endblock %}
