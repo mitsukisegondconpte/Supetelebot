@@ -1,0 +1,480 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard Administrateur - Bot d'Échecs{% endblock %}
+
+{% block head %}
+<style>
+    .stat-card {
+        transition: transform 0.2s;
+    }
+    .stat-card:hover {
+        transform: translateY(-5px);
+    }
+    .activity-item {
+        border-left: 4px solid #007bff;
+        padding: 10px 15px;
+        margin: 5px 0;
+        background: #f8f9fa;
+    }
+    .game-item {
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px 0;
+        background: white;
+    }
+    .metric-badge {
+        font-size: 2rem;
+        font-weight: bold;
+    }
+    .real-time-indicator {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #28a745;
+        display: inline-block;
+        animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1><i class="fas fa-tachometer-alt"></i> Dashboard Administrateur</h1>
+            <div class="d-flex align-items-center">
+                <span class="real-time-indicator me-2"></span>
+                <span class="text-success">Temps réel actif</span>
+                <span class="badge bg-info ms-3" id="last-update">Chargement...</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statistiques principales -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card stat-card border-primary">
+            <div class="card-body text-center">
+                <i class="fas fa-users fa-3x text-primary mb-3"></i>
+                <h3 class="metric-badge text-primary" id="total-users">{{ stats.total_users or 0 }}</h3>
+                <p class="card-text">Utilisateurs Totaux</p>
+                <small class="text-muted">+{{ today_stats.new_users or 0 }} aujourd'hui</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card border-success">
+            <div class="card-body text-center">
+                <i class="fas fa-chess fa-3x text-success mb-3"></i>
+                <h3 class="metric-badge text-success" id="active-games">{{ stats.active_games or 0 }}</h3>
+                <p class="card-text">Parties Actives</p>
+                <small class="text-muted">{{ stats.total_games or 0 }} total</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card border-warning">
+            <div class="card-body text-center">
+                <i class="fas fa-chart-line fa-3x text-warning mb-3"></i>
+                <h3 class="metric-badge text-warning" id="today-activities">{{ today_stats.activities or 0 }}</h3>
+                <p class="card-text">Activités Aujourd'hui</p>
+                <small class="text-muted">{{ stats.active_users or 0 }} utilisateurs actifs</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card border-info">
+            <div class="card-body text-center">
+                <i class="fas fa-chess-board fa-3x text-info mb-3"></i>
+                <h3 class="metric-badge text-info" id="total-moves">{{ stats.total_moves or 0 }}</h3>
+                <p class="card-text">Coups Totaux</p>
+                <small class="text-muted">+{{ today_stats.new_games or 0 }} nouvelles parties</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Graphiques et monitoring -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-chart-area"></i> Activité des Dernières 24h</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="activityChart" height="80"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-trophy"></i> Top Utilisateurs Actifs</h5>
+            </div>
+            <div class="card-body">
+                <div id="top-users-list">
+                    {% for user in stats.top_users or [] %}
+                    <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                        <div>
+                            <strong>{{ user.name }}</strong>
+                            <br><small class="text-muted">ID: {{ user.id }}</small>
+                        </div>
+                        <span class="badge bg-primary">{{ user.activity_count }}</span>
+                    </div>
+                    {% endfor %}
+                    {% if not stats.top_users %}
+                    <p class="text-muted text-center">Aucune activité récente</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Actions rapides -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-bolt"></i> Actions Rapides</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <button class="btn btn-info w-100 mb-2" onclick="refreshStats()">
+                            <i class="fas fa-sync-alt"></i> Actualiser Stats
+                        </button>
+                    </div>
+                    <div class="col-md-3">
+                        <a href="{{ url_for('admin.monitor') }}" class="btn btn-success w-100 mb-2">
+                            <i class="fas fa-eye"></i> Monitoring Live
+                        </a>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-warning w-100 mb-2" onclick="showCleanupModal()">
+                            <i class="fas fa-broom"></i> Nettoyage Système
+                        </button>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-danger w-100 mb-2" onclick="exportData()">
+                            <i class="fas fa-download"></i> Export Données
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Activités récentes -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between">
+                <h5><i class="fas fa-history"></i> Activités Récentes</h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="loadRecentActivities()">
+                    <i class="fas fa-refresh"></i>
+                </button>
+            </div>
+            <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                <div id="recent-activities">
+                    {% for activity in recent_activities %}
+                    <div class="activity-item">
+                        <div class="d-flex justify-content-between">
+                            <strong>{{ activity.user.first_name or activity.user.username or 'Utilisateur ' + activity.user.telegram_id|string }}</strong>
+                            <small class="text-muted">{{ activity.created_at.strftime('%H:%M:%S') }}</small>
+                        </div>
+                        <div class="mt-1">
+                            <span class="badge bg-secondary">{{ activity.activity_type }}</span>
+                            {{ activity.description }}
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% if not recent_activities %}
+                    <p class="text-muted text-center">Aucune activité récente</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between">
+                <h5><i class="fas fa-gamepad"></i> Parties Actives</h5>
+                <a href="{{ url_for('admin.games') }}" class="btn btn-sm btn-outline-primary">
+                    Voir tout
+                </a>
+            </div>
+            <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                {% for game in active_games %}
+                <div class="game-item">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>{{ game.user.first_name or game.user.username }}</strong>
+                            <br><small class="text-muted">Partie #{{ game.id }}</small>
+                        </div>
+                        <div class="text-end">
+                            <span class="badge bg-success">{{ game.move_count }} coups</span>
+                            <br><small class="text-muted">{{ game.created_at.strftime('%d/%m %H:%M') }}</small>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% if not active_games %}
+                <p class="text-muted text-center">Aucune partie active</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Informations système -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-server"></i> Informations Système</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <strong>Uptime:</strong>
+                        <p id="system-uptime">{{ stats.uptime or 'N/A' }}</p>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Dernière MAJ:</strong>
+                        <p id="last-stats-update">{{ stats.last_updated or 'N/A' }}</p>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Version:</strong>
+                        <p>Bot d'Échecs Pro v2.0</p>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Plateforme:</strong>
+                        <p>Railway + PostgreSQL</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de nettoyage -->
+<div class="modal fade" id="cleanupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nettoyage Système</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Supprimer les données anciennes pour libérer de l'espace :</p>
+                <div class="mb-3">
+                    <label for="cleanup-days" class="form-label">Supprimer les données de plus de :</label>
+                    <select class="form-select" id="cleanup-days">
+                        <option value="7">7 jours</option>
+                        <option value="30" selected>30 jours</option>
+                        <option value="60">60 jours</option>
+                        <option value="90">90 jours</option>
+                    </select>
+                </div>
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Cette action est irréversible !
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-danger" onclick="executeCleanup()">Nettoyer</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+// Configuration Chart.js
+const ctx = document.getElementById('activityChart').getContext('2d');
+const activityChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: [],
+        datasets: [{
+            label: 'Activités',
+            data: [],
+            borderColor: 'rgb(75, 192, 192)',
+            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+            tension: 0.1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                beginAtZero: true
+            }
+        }
+    }
+});
+
+// Connexion WebSocket pour temps réel
+const socket = io('/admin');
+
+socket.on('connect', function() {
+    console.log('Connecté au monitoring temps réel');
+    document.getElementById('last-update').textContent = 'Connecté';
+});
+
+socket.on('stats_update', function(data) {
+    updateDashboardStats(data);
+    document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+});
+
+socket.on('live_activity', function(data) {
+    addLiveActivity(data);
+});
+
+// Fonctions utilitaires
+function updateDashboardStats(stats) {
+    document.getElementById('total-users').textContent = stats.total_users || 0;
+    document.getElementById('active-games').textContent = stats.active_games || 0;
+    document.getElementById('today-activities').textContent = stats.today_activities || 0;
+    document.getElementById('total-moves').textContent = stats.total_moves || 0;
+    document.getElementById('system-uptime').textContent = stats.uptime || 'N/A';
+}
+
+function addLiveActivity(activity) {
+    const container = document.getElementById('recent-activities');
+    const activityDiv = document.createElement('div');
+    activityDiv.className = 'activity-item';
+    activityDiv.innerHTML = `
+        <div class="d-flex justify-content-between">
+            <strong>${activity.user_name}</strong>
+            <small class="text-muted">${new Date().toLocaleTimeString()}</small>
+        </div>
+        <div class="mt-1">
+            <span class="badge bg-success">LIVE</span>
+            <span class="badge bg-secondary">${activity.type}</span>
+            ${activity.description}
+        </div>
+    `;
+    container.insertBefore(activityDiv, container.firstChild);
+    
+    // Limiter à 20 activités
+    while (container.children.length > 20) {
+        container.removeChild(container.lastChild);
+    }
+}
+
+function refreshStats() {
+    socket.emit('request_stats');
+    loadActivityChart();
+}
+
+function loadActivityChart() {
+    fetch('/admin/api/user-activity-chart')
+        .then(response => response.json())
+        .then(data => {
+            activityChart.data.labels = data.labels;
+            activityChart.data.datasets[0].data = data.data;
+            activityChart.update();
+        })
+        .catch(error => console.error('Erreur chargement graphique:', error));
+}
+
+function loadRecentActivities() {
+    fetch('/api/activities?limit=20')
+        .then(response => response.json())
+        .then(activities => {
+            const container = document.getElementById('recent-activities');
+            container.innerHTML = '';
+            
+            activities.forEach(activity => {
+                const activityDiv = document.createElement('div');
+                activityDiv.className = 'activity-item';
+                activityDiv.innerHTML = `
+                    <div class="d-flex justify-content-between">
+                        <strong>${activity.user_name}</strong>
+                        <small class="text-muted">${new Date(activity.timestamp).toLocaleTimeString()}</small>
+                    </div>
+                    <div class="mt-1">
+                        <span class="badge bg-secondary">${activity.type}</span>
+                        ${activity.description}
+                    </div>
+                `;
+                container.appendChild(activityDiv);
+            });
+        })
+        .catch(error => console.error('Erreur chargement activités:', error));
+}
+
+function showCleanupModal() {
+    new bootstrap.Modal(document.getElementById('cleanupModal')).show();
+}
+
+function executeCleanup() {
+    const days = document.getElementById('cleanup-days').value;
+    
+    fetch('/admin/api/cleanup', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ days: parseInt(days) })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Nettoyage effectué avec succès: ' + data.message);
+            refreshStats();
+        } else {
+            alert('Erreur: ' + data.error);
+        }
+        bootstrap.Modal.getInstance(document.getElementById('cleanupModal')).hide();
+    })
+    .catch(error => {
+        console.error('Erreur nettoyage:', error);
+        alert('Erreur lors du nettoyage');
+    });
+}
+
+function exportData() {
+    // Créer un export des données principales
+    const exportData = {
+        stats: {
+            exported_at: new Date().toISOString(),
+            total_users: document.getElementById('total-users').textContent,
+            active_games: document.getElementById('active-games').textContent,
+            total_moves: document.getElementById('total-moves').textContent
+        }
+    };
+    
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'chess_bot_export_' + new Date().toISOString().split('T')[0] + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+// Initialisation
+document.addEventListener('DOMContentLoaded', function() {
+    loadActivityChart();
+    setInterval(refreshStats, 30000); // Actualiser toutes les 30s
+});
+</script>
+{% endblock %}
