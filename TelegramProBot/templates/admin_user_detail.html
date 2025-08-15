@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block title %}{{ user.first_name or user.username or 'Utilisateur ' + user.telegram_id|string }} - Détails{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}">Dashboard</a></li>
+                <li class="breadcrumb-item"><a href="{{ url_for('admin.users') }}">Utilisateurs</a></li>
+                <li class="breadcrumb-item active">{{ user.first_name or user.username or 'Utilisateur ' + user.telegram_id|string }}</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<!-- En-tête utilisateur -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-md-2 text-center">
+                        <div class="user-avatar">
+                            {{ (user.first_name or user.username or 'U')[0].upper() }}
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <h2>{{ user.first_name or user.username or 'Utilisateur ' + user.telegram_id|string }}</h2>
+                        {% if user.username %}
+                        <p class="text-muted">@{{ user.username }}</p>
+                        {% endif %}
+                        <p><strong>ID Telegram:</strong> <code>{{ user.telegram_id }}</code></p>
+                        <p><strong>Langue:</strong> {{ user.language_code or 'Non spécifiée' }}</p>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-outline-warning" onclick="toggleUserBlock({{ user.telegram_id }}, {{ user.is_blocked|lower }})">
+                                <i class="fas fa-{{ 'unlock' if user.is_blocked else 'ban' }}"></i>
+                                {{ 'Débloquer' if user.is_blocked else 'Bloquer' }}
+                            </button>
+                            <button class="btn btn-outline-info" onclick="sendMessage()">
+                                <i class="fas fa-paper-plane"></i> Message
+                            </button>
+                            <button class="btn btn-outline-success" onclick="exportUserData()">
+                                <i class="fas fa-download"></i> Export
+                            </button>
+                        </div>
+                        <div class="mt-2">
+                            {% if user.is_blocked %}
+                                <span class="badge bg-danger">Utilisateur bloqué</span>
+                            {% else %}
+                                {% set days_since_activity = (moment.utcnow() - user.last_activity).days %}
+                                {% if days_since_activity <= 1 %}
+                                    <span class="badge bg-success">Actif</span>
+                                {% elif days_since_activity <= 7 %}
+                                    <span class="badge bg-warning">Récent</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">Inactif ({{ days_since_activity }} jours)</span>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statistiques -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="fas fa-chess fa-3x text-primary mb-3"></i>
+                <h3>{{ stats.total_games or 0 }}</h3>
+                <p class="card-text">Parties Totales</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="fas fa-trophy fa-3x text-success mb-3"></i>
+                <h3>{{ stats.wins or 0 }}</h3>
+                <p class="card-text">Victoires</p>
+                <small class="text-muted">{{ (stats.win_rate or 0)|round(1) }}% de victoires</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="fas fa-chess-board fa-3x text-warning mb-3"></i>
+                <h3>{{ stats.total_moves or 0 }}</h3>
+                <p class="card-text">Coups Joués</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="fas fa-calendar fa-3x text-info mb-3"></i>
+                <h3>{{ stats.recent_activities or 0 }}</h3>
+                <p class="card-text">Activités (7j)</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Détails et historique -->
+<div class="row">
+    <!-- Parties -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-gamepad"></i> Parties Récentes</h5>
+            </div>
+            <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                {% for game in games %}
+                <div class="game-item mb-3 p-3 border rounded">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>Partie #{{ game.id }}</strong>
+                            <span class="badge bg-{{ 'success' if game.status == 'active' else 'secondary' }}">
+                                {{ game.status|title }}
+                            </span>
+                        </div>
+                        <small class="text-muted">{{ game.created_at.strftime('%d/%m/%Y %H:%M') }}</small>
+                    </div>
+                    <div class="mt-2">
+                        <p class="mb-1">
+                            <i class="fas fa-chess-pawn"></i> {{ game.move_count }} coups
+                            <span class="ms-3"><i class="fas fa-brain"></i> Niveau {{ game.difficulty_level }}</span>
+                        </p>
+                        {% if game.result %}
+                        <p class="mb-1">
+                            <strong>Résultat:</strong>
+                            {% if game.result == 'white_wins' %}
+                                <span class="text-success">Victoire</span>
+                            {% elif game.result == 'black_wins' %}
+                                <span class="text-danger">Défaite</span>
+                            {% else %}
+                                <span class="text-warning">Match nul</span>
+                            {% endif %}
+                        </p>
+                        {% endif %}
+                        {% if game.finished_at %}
+                        <small class="text-muted">Terminée le {{ game.finished_at.strftime('%d/%m/%Y %H:%M') }}</small>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+                {% if not games %}
+                <p class="text-muted text-center">Aucune partie trouvée</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Activités -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-history"></i> Activités Récentes</h5>
+            </div>
+            <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                {% for activity in activities %}
+                <div class="activity-item mb-2 p-2 border-start border-4 border-primary bg-light">
+                    <div class="d-flex justify-content-between">
+                        <span class="badge bg-secondary">{{ activity.activity_type }}</span>
+                        <small class="text-muted">{{ activity.created_at.strftime('%d/%m %H:%M') }}</small>
+                    </div>
+                    <div class="mt-1">{{ activity.description }}</div>
+                    {% if activity.data %}
+                    <small class="text-muted">{{ activity.data }}</small>
+                    {% endif %}
+                </div>
+                {% endfor %}
+                {% if not activities %}
+                <p class="text-muted text-center">Aucune activité récente</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Informations détaillées -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-info-circle"></i> Informations Détaillées</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <table class="table table-borderless">
+                            <tr>
+                                <td><strong>Première connexion:</strong></td>
+                                <td>{{ user.created_at.strftime('%d/%m/%Y %H:%M:%S') }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Dernière activité:</strong></td>
+                                <td>{{ user.last_activity.strftime('%d/%m/%Y %H:%M:%S') }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Nom complet:</strong></td>
+                                <td>{{ (user.first_name or '') + ' ' + (user.last_name or '') }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Est un bot:</strong></td>
+                                <td>{{ 'Oui' if user.is_bot else 'Non' }}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <table class="table table-borderless">
+                            <tr>
+                                <td><strong>Parties actives:</strong></td>
+                                <td>{{ stats.active_games or 0 }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Parties terminées:</strong></td>
+                                <td>{{ stats.finished_games or 0 }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Défaites:</strong></td>
+                                <td>{{ stats.losses or 0 }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Matchs nuls:</strong></td>
+                                <td>{{ stats.draws or 0 }}</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.user-avatar {
+    width: 80px;
+    height: 80px;
+    background: linear-gradient(45deg, #667eea, #764ba2);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 2rem;
+    font-weight: bold;
+    margin: 0 auto;
+}
+.game-item {
+    transition: transform 0.2s;
+}
+.game-item:hover {
+    transform: translateX(5px);
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleUserBlock(userId, isBlocked) {
+    const action = isBlocked ? 'débloquer' : 'bloquer';
+    
+    if (confirm(`Êtes-vous sûr de vouloir ${action} cet utilisateur ?`)) {
+        fetch('/admin/api/block-user', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                telegram_id: userId,
+                block: !isBlocked
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(data.message);
+                location.reload();
+            } else {
+                alert('Erreur: ' + data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Erreur:', error);
+            alert('Erreur lors de l\'opération');
+        });
+    }
+}
+
+function sendMessage() {
+    const message = prompt('Message à envoyer à l\'utilisateur:');
+    if (message) {
+        // Ici vous pourriez implémenter l'envoi de message via l'API Telegram
+        alert('Fonctionnalité d\'envoi de message à implémenter');
+    }
+}
+
+function exportUserData() {
+    const userData = {
+        user_info: {
+            telegram_id: {{ user.telegram_id }},
+            name: '{{ user.first_name or user.username or "Utilisateur" }}',
+            username: '{{ user.username or "" }}',
+            created_at: '{{ user.created_at.isoformat() }}',
+            last_activity: '{{ user.last_activity.isoformat() }}'
+        },
+        statistics: {{ stats|tojson }},
+        exported_at: new Date().toISOString()
+    };
+    
+    const blob = new Blob([JSON.stringify(userData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'user_{{ user.telegram_id }}_export.json';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+</script>
+{% endblock %}
