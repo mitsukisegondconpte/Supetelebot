@@ -1,0 +1,373 @@
+{% extends "base.html" %}
+
+{% block title %}Gestion Utilisateurs - Bot d'Échecs{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1><i class="fas fa-users"></i> Gestion des Utilisateurs</h1>
+            <div>
+                <button class="btn btn-outline-primary" onclick="refreshUsers()">
+                    <i class="fas fa-sync-alt"></i> Actualiser
+                </button>
+                <button class="btn btn-outline-success" onclick="exportUsers()">
+                    <i class="fas fa-download"></i> Exporter
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filtres et recherche -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <input type="text" class="form-control" id="search-users" placeholder="Rechercher un utilisateur...">
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select" id="filter-status">
+                            <option value="">Tous les statuts</option>
+                            <option value="active">Actifs</option>
+                            <option value="inactive">Inactifs</option>
+                            <option value="blocked">Bloqués</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select" id="sort-users">
+                            <option value="last_activity">Dernière activité</option>
+                            <option value="created_at">Date création</option>
+                            <option value="username">Nom d'utilisateur</option>
+                            <option value="total_games">Nombre de parties</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body text-center">
+                <h5>{{ users.total }} Utilisateurs</h5>
+                <small class="text-muted">Page {{ users.page }} sur {{ users.pages }}</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Liste des utilisateurs -->
+<div class="card">
+    <div class="card-header">
+        <h5><i class="fas fa-list"></i> Liste des Utilisateurs</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Utilisateur</th>
+                        <th>Telegram ID</th>
+                        <th>Statut</th>
+                        <th>Parties</th>
+                        <th>Dernière activité</th>
+                        <th>Membre depuis</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users.items %}
+                    <tr>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div class="avatar-circle me-2">
+                                    {{ (user.first_name or user.username or 'U')[0].upper() }}
+                                </div>
+                                <div>
+                                    <strong>{{ user.first_name or user.username or 'Utilisateur ' + user.telegram_id|string }}</strong>
+                                    {% if user.username %}
+                                    <br><small class="text-muted">@{{ user.username }}</small>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <code>{{ user.telegram_id }}</code>
+                        </td>
+                        <td>
+                            {% if user.is_blocked %}
+                                <span class="badge bg-danger">Bloqué</span>
+                            {% else %}
+                                {% set days_since_activity = (moment.utcnow() - user.last_activity).days %}
+                                {% if days_since_activity <= 1 %}
+                                    <span class="badge bg-success">Actif</span>
+                                {% elif days_since_activity <= 7 %}
+                                    <span class="badge bg-warning">Récent</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">Inactif</span>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-info">{{ user.games|length }}</span>
+                            {% if user.games %}
+                                {% set active_games = user.games|selectattr('status', 'equalto', 'active')|list|length %}
+                                {% if active_games > 0 %}
+                                    <span class="badge bg-success ms-1">{{ active_games }} actives</span>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span title="{{ user.last_activity.strftime('%d/%m/%Y %H:%M:%S') }}">
+                                {{ moment(user.last_activity).fromNow() }}
+                            </span>
+                        </td>
+                        <td>
+                            {{ user.created_at.strftime('%d/%m/%Y') }}
+                        </td>
+                        <td>
+                            <div class="btn-group" role="group">
+                                <a href="{{ url_for('admin.user_detail', telegram_id=user.telegram_id) }}" 
+                                   class="btn btn-sm btn-outline-primary" title="Voir détails">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <button class="btn btn-sm btn-outline-warning" 
+                                        onclick="toggleUserBlock({{ user.telegram_id }}, {{ user.is_blocked|lower }})"
+                                        title="{{ 'Débloquer' if user.is_blocked else 'Bloquer' }}">
+                                    <i class="fas fa-{{ 'unlock' if user.is_blocked else 'ban' }}"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-info" 
+                                        onclick="showUserStats({{ user.telegram_id }})"
+                                        title="Statistiques">
+                                    <i class="fas fa-chart-bar"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Pagination -->
+        {% if users.pages > 1 %}
+        <nav aria-label="Navigation utilisateurs">
+            <ul class="pagination justify-content-center">
+                {% if users.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('admin.users', page=users.prev_num) }}">Précédent</a>
+                </li>
+                {% endif %}
+                
+                {% for page_num in users.iter_pages() %}
+                    {% if page_num %}
+                        {% if page_num != users.page %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('admin.users', page=page_num) }}">{{ page_num }}</a>
+                        </li>
+                        {% else %}
+                        <li class="page-item active">
+                            <span class="page-link">{{ page_num }}</span>
+                        </li>
+                        {% endif %}
+                    {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">…</span>
+                    </li>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if users.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('admin.users', page=users.next_num) }}">Suivant</a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Modal statistiques utilisateur -->
+<div class="modal fade" id="userStatsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Statistiques Utilisateur</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="user-stats-content">
+                <!-- Contenu dynamique -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.avatar-circle {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(45deg, #667eea, #764ba2);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function refreshUsers() {
+    location.reload();
+}
+
+function exportUsers() {
+    // Exporter la liste des utilisateurs
+    fetch('/api/users')
+        .then(response => response.json())
+        .then(users => {
+            const csv = convertToCSV(users);
+            downloadCSV(csv, 'utilisateurs_' + new Date().toISOString().split('T')[0] + '.csv');
+        })
+        .catch(error => {
+            console.error('Erreur export:', error);
+            alert('Erreur lors de l\'export');
+        });
+}
+
+function convertToCSV(users) {
+    const headers = ['ID Telegram', 'Nom', 'Username', 'Dernière activité', 'Nombre de parties', 'Statut'];
+    const rows = users.map(user => [
+        user.id,
+        user.name,
+        user.username || '',
+        user.last_activity,
+        user.total_games,
+        user.blocked ? 'Bloqué' : 'Actif'
+    ]);
+    
+    return [headers, ...rows].map(row => row.map(field => `"${field}"`).join(',')).join('\n');
+}
+
+function downloadCSV(csv, filename) {
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function toggleUserBlock(userId, isBlocked) {
+    const action = isBlocked ? 'débloquer' : 'bloquer';
+    
+    if (confirm(`Êtes-vous sûr de vouloir ${action} cet utilisateur ?`)) {
+        fetch('/admin/api/block-user', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                telegram_id: userId,
+                block: !isBlocked
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(data.message);
+                location.reload();
+            } else {
+                alert('Erreur: ' + data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Erreur:', error);
+            alert('Erreur lors de l\'opération');
+        });
+    }
+}
+
+function showUserStats(userId) {
+    const modal = new bootstrap.Modal(document.getElementById('userStatsModal'));
+    const content = document.getElementById('user-stats-content');
+    
+    content.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Chargement...</div>';
+    modal.show();
+    
+    // Charger les statistiques
+    fetch(`/api/user-stats/${userId}`)
+        .then(response => response.json())
+        .then(stats => {
+            content.innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Parties</h6>
+                        <p>Total: ${stats.total_games || 0}</p>
+                        <p>Actives: ${stats.active_games || 0}</p>
+                        <p>Terminées: ${stats.finished_games || 0}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Résultats</h6>
+                        <p>Victoires: ${stats.wins || 0}</p>
+                        <p>Défaites: ${stats.losses || 0}</p>
+                        <p>Matchs nuls: ${stats.draws || 0}</p>
+                        <p>Taux de victoire: ${(stats.win_rate || 0).toFixed(1)}%</p>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <h6>Activité</h6>
+                        <p>Coups totaux: ${stats.total_moves || 0}</p>
+                        <p>Activités récentes: ${stats.recent_activities || 0}</p>
+                        <p>Membre depuis: ${stats.member_since || 'N/A'}</p>
+                        <p>Dernière activité: ${stats.last_activity || 'N/A'}</p>
+                    </div>
+                </div>
+            `;
+        })
+        .catch(error => {
+            console.error('Erreur chargement stats:', error);
+            content.innerHTML = '<div class="alert alert-danger">Erreur lors du chargement des statistiques</div>';
+        });
+}
+
+// Recherche et filtres
+document.getElementById('search-users').addEventListener('input', function() {
+    const searchTerm = this.value.toLowerCase();
+    const rows = document.querySelectorAll('tbody tr');
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    });
+});
+
+document.getElementById('filter-status').addEventListener('change', function() {
+    const status = this.value;
+    const rows = document.querySelectorAll('tbody tr');
+    
+    rows.forEach(row => {
+        if (!status) {
+            row.style.display = '';
+        } else {
+            const badge = row.querySelector('.badge');
+            const badgeText = badge ? badge.textContent.toLowerCase() : '';
+            
+            let show = false;
+            if (status === 'active' && (badgeText === 'actif' || badgeText === 'récent')) show = true;
+            if (status === 'inactive' && badgeText === 'inactif') show = true;
+            if (status === 'blocked' && badgeText === 'bloqué') show = true;
+            
+            row.style.display = show ? '' : 'none';
+        }
+    });
+});
+</script>
+{% endblock %}
